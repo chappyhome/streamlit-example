@@ -1,38 +1,67 @@
-from collections import namedtuple
-import altair as alt
-import math
-import pandas as pd
-import streamlit as st
+# -*- coding:utf-8 -*-
+import streamlit as st # import the Streamlit library
+from langchain.chains import LLMChain, SimpleSequentialChain # import LangChain libraries
+from langchain.llms import OpenAI # import OpenAI model
+from langchain.prompts import PromptTemplate # import PromptTemplate
 
-"""
-# Welcome to Streamlit11111!
+API = "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"
+# Set the title of the Streamlit app
+st.title("✅ What's TRUE  : Using LangChain `SimpleSequentialChain`")
 
-Edit `/streamlit_app.py` to customize this app to your heart's desire :heart:
+# Add a link to the Github repository that inspired this app
+st.markdown("Inspired from [fact-checker](https://github.com/jagilley/fact-checker) by Jagiley")
 
-If you have any questions, checkout our [documentation](https://docs.streamlit.io) and [community
-forums](https://discuss.streamlit.io).
+# If an API key has been provided, create an OpenAI language model instance
+if API:
+    llm = OpenAI(temperature=0.7, openai_api_key=API)
+else:
+    # If an API key hasn't been provided, display a warning message
+    st.warning("Enter your OPENAI API-KEY. Get your OpenAI API key from [here](https://platform.openai.com/account/api-keys).\n")
 
-In the meantime, below is an example of what you can do with just a few lines of code:
-"""
+# Add a text input box for the user's question
+user_question = st.text_input(
+    "Enter Your Question : ",
+    placeholder = "Cyanobacteria can perform photosynthetsis , are they considered as plants?",
+)
 
+# Generating the final answer to the user's question using all the chains
+if st.button("Tell me about it", type="primary"):
+    # Chain 1: Generating a rephrased version of the user's question
+    template = """{question}\n\n"""
+    prompt_template = PromptTemplate(input_variables=["question"], template=template)
+    question_chain = LLMChain(llm=llm, prompt=prompt_template)
 
-with st.echo(code_location='below'):
-    total_points = st.slider("Number of points in spiral", 1, 5000, 2000)
-    num_turns = st.slider("Number of turns in spiral", 1, 100, 9)
+    # Chain 2: Generating assumptions made in the statement
+    template = """Here is a statement:
+        {statement}
+        Make a bullet point list of the assumptions you made when producing the above statement.\n\n"""
+    prompt_template = PromptTemplate(input_variables=["statement"], template=template)
+    assumptions_chain = LLMChain(llm=llm, prompt=prompt_template)
+    assumptions_chain_seq = SimpleSequentialChain(
+        chains=[question_chain, assumptions_chain], verbose=True
+    )
 
-    Point = namedtuple('Point', 'x y')
-    data = []
+    # Chain 3: Fact checking the assumptions
+    template = """Here is a bullet point list of assertions:
+    {assertions}
+    For each assertion, determine whether it is true or false. If it is false, explain why.\n\n"""
+    prompt_template = PromptTemplate(input_variables=["assertions"], template=template)
+    fact_checker_chain = LLMChain(llm=llm, prompt=prompt_template)
+    fact_checker_chain_seq = SimpleSequentialChain(
+        chains=[question_chain, assumptions_chain, fact_checker_chain], verbose=True
+    )
 
-    points_per_turn = total_points / num_turns
+    # Final Chain: Generating the final answer to the user's question based on the facts and assumptions
+    template = """In light of the above facts, how would you answer the question '{}'""".format(
+        user_question
+    )
+    template = """{facts}\n""" + template
+    prompt_template = PromptTemplate(input_variables=["facts"], template=template)
+    answer_chain = LLMChain(llm=llm, prompt=prompt_template)
+    overall_chain = SimpleSequentialChain(
+        chains=[question_chain, assumptions_chain, fact_checker_chain, answer_chain],
+        verbose=True,
+    )
 
-    for curr_point_num in range(total_points):
-        curr_turn, i = divmod(curr_point_num, points_per_turn)
-        angle = (curr_turn + 1) * 2 * math.pi * i / points_per_turn
-        radius = curr_point_num / total_points
-        x = radius * math.cos(angle)
-        y = radius * math.sin(angle)
-        data.append(Point(x, y))
-
-    st.altair_chart(alt.Chart(pd.DataFrame(data), height=500, width=500)
-        .mark_circle(color='#0068c9', opacity=0.5)
-        .encode(x='x:Q', y='y:Q'))
+    # Running all the chains on the user's question and displaying the final answer
+    st.success(overall_chain.run(user_question))
